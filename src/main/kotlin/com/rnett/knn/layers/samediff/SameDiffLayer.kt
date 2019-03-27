@@ -46,7 +46,7 @@ abstract class SameDiffLayer(
     open val weightParams: Map<String, List<Int>> = emptyMap()
     open val biasParams: Map<String, List<Int>> = emptyMap()
 
-    open fun initializeParams(params: Map<String, INDArray>) {}
+    open fun initializeParams(params: MutableMap<String, INDArray>) {}
 
     abstract fun SameDiffDef.defineLayer(input: SDVariable): SDVariable
 
@@ -75,7 +75,7 @@ abstract class SameDiffLayer(
             override val weightParams = weightParams
             override val biasParams = biasParams
 
-            override fun initializeParams(params: Map<String, INDArray>) = initializeParams(params)
+            override fun initializeParams(params: MutableMap<String, INDArray>) = initializeParams(params)
         }
     }
 

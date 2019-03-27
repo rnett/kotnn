@@ -25,7 +25,11 @@ abstract class FeedForwardLayer<out T : DL4JFeedForwardLayer, S : FeedForwardLay
         builder as DL4JFeedForwardLayer.Builder
 
         //builder.nIn(nIn)
-        builder.nOut(nOut)
+        try {
+            builder.nOut(nOut)
+        } catch (e: UnsupportedOperationException) {
+
+        }
     }
 
     override fun outputShape(inputShape: List<Int>): List<Int> {

@@ -38,8 +38,6 @@ repositories {
     //maven( "https://oss.sonatype.org/content/repositories/snapshots")
 }
 
-val core_version = "1.5.0"
-//TODO using snapshot kills accuracy
 //val dl4j_version  = "1.0.0-beta3"
 val dl4j_version = "1.0.0-SNAPSHOT"
 val slf4j_version = "1.7.25"
@@ -48,9 +46,6 @@ dependencies {
     implementation(kotlin("stdlib-jdk8", "1.3.30-eap-45"))
     testCompile("junit", "junit", "4.12")
     compile(kotlin("reflect"))
-
-
-    implementation("com.github.rnett:core:$core_version")
 
     implementation("org.deeplearning4j:deeplearning4j-core:$dl4j_version")
     implementation("org.nd4j:nd4j-native-platform:$dl4j_version")
