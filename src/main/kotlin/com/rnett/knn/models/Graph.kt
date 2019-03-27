@@ -1,289 +1,548 @@
 package com.rnett.knn.models
 
+import com.rnett.knn.P
+import com.rnett.knn.Param2
 import com.rnett.knn.layers.IHasLayers
 import com.rnett.knn.layers.ILayer
-import com.rnett.knn.layers.samediff.SameDiffDef
+import com.rnett.knn.layers.convolutional.Convolution2DLayer
+import com.rnett.knn.layers.convolutional.Subsampling2DLayer
+import com.rnett.knn.layers.feedforeward.DenseLayer
+import com.rnett.knn.layers.feedforeward.output.OutputLayer
+import com.rnett.knn.layers.samediff.SameDiffLambdaDef
 import com.rnett.knn.layers.samediff.SameDiffLambdaLayer
 import com.rnett.knn.layers.sizing.CollateDimensionLayer
+import com.rnett.knn.layers.sizing.CroppingLayer
 import com.rnett.knn.layers.sizing.DistributeDimensionLayer
-import com.rnett.knn.layers.wrapper
+import com.rnett.knn.layers.sizing.PermuteLayer
+import com.rnett.knn.p2
 import org.deeplearning4j.nn.conf.ComputationGraphConfiguration
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration
 import org.deeplearning4j.nn.conf.Updater
 import org.nd4j.autodiff.samediff.SDVariable
+import org.nd4j.linalg.activations.impl.ActivationLReLU
+import org.nd4j.linalg.activations.impl.ActivationSoftmax
 import org.nd4j.linalg.learning.config.IUpdater
-import org.deeplearning4j.nn.conf.graph.GraphVertex as DL4JVertex
-import org.deeplearning4j.nn.conf.layers.Layer as DL4JLayer
+import org.nd4j.linalg.lossfunctions.impl.LossNegativeLogLikelihood
+import org.deeplearning4j.nn.graph.ComputationGraph as DL4JComputationGraph
+
 
 @DslMarker
 annotation class GraphBuilderDSL
 
-fun List<ILayer>.toLayers() = object : IHasLayers {
-    override val layers = this@toLayers
+fun reversePermutation(vararg dimension: Int): IntArray {
+    if (dimension.sorted() != (0 until dimension.size).toList())
+        throw IllegalArgumentException("${dimension.toList()} is not a valid permutation order, elements must be all of 0 .. ${dimension.size - 1}")
+
+    if (dimension.size <= 1)
+        return dimension
+    else if (dimension.size == 2)
+        return dimension
+
+    val new = MutableList(dimension.size) { 0 }
+    dimension.forEachIndexed { index, x ->
+        new[x] = index
+    }
+    return new.toIntArray()
 }
 
-typealias SameDiffLambda = SameDiffDef.(input: SDVariable) -> SDVariable
+class Tensor internal constructor(vertex: GraphVertex) {
 
-class ComplexNetwork() {
 
-    constructor(builder: ComplexNetwork.() -> Unit) : this() {
-        invoke(builder)
+    internal constructor(layer: ILayer, inputs: List<Tensor>) : this(LayerVertex(layer, inputs.map { it.vertex }))
+    internal constructor(vertex: WrapperVertex<*>, inputs: List<Tensor>) : this(
+        VertexWrapper(
+            vertex,
+            inputs.map { it.vertex })
+    )
+
+    internal constructor(vertex: CustomVertex, inputs: List<Tensor>) : this(vertex.create(inputs.map { it.vertex }))
+
+    internal constructor(layer: ILayer, vararg inputs: Tensor) : this(layer, inputs.toList())
+    internal constructor(vertex: WrapperVertex<*>, vararg inputs: Tensor) : this(vertex, inputs.toList())
+    internal constructor(vertex: CustomVertex, vararg inputs: Tensor) : this(vertex, inputs.toList())
+
+    var vertex: GraphVertex = vertex
+        internal set
+
+    val shape get() = vertex.outputShape
+    val rank get() = shape.size
+
+    @GraphBuilderDSL
+    fun dup() = Tensor(vertex)
+
+    // index/dimension stuff
+
+    internal val dimNames = mutableMapOf<String, Int>()
+
+    val dimensionMap get() = dimNames.toMap()
+    val dimensions get() = dimensionMap.toList().sortedBy { it.second }.map { it.first }
+
+    inner class Dimension internal constructor(val name: String) {
+        val index
+            get() = run {
+                val ind = dimNames[name]
+                    ?: throw IllegalArgumentException("No dimension with name $name.  Use Tensor.define() to name dimensions.")
+
+                if (ind >= rank)
+                    throw IllegalArgumentException("Can not get dimension $name with index $ind for a tensor of rank $rank")
+
+                ind
+            }
+
+        init {
+            if (index >= rank)
+                throw IllegalArgumentException("Can not get dimension $name with index $index for a tensor of rank $rank")
+
+        }
+
+        fun crop(cropping: Param2, name: String = "cropping") = this@Tensor.crop(index, cropping, name)
+
+        fun crop(before: Int, after: Int, name: String = "cropping") = this@Tensor.crop(index, P(before, after), name)
+
+    }
+
+    fun reversePermutation(vararg dimension: Dimension) =
+        reversePermutation(*dimension.map { it.index }.toIntArray()).map { this[it] }
+
+    fun reversePermutation(vararg dimension: String) =
+        reversePermutation(*dimension.map { this[it].index }.toIntArray()).map { this[it] }
+
+    @GraphBuilderDSL
+    fun define(vararg names: String): List<Dimension> {
+        if (names.size != rank)
+            throw IllegalArgumentException(
+                "Number of names given must equal the rank of the tensor.  " +
+                        "Got ${names.size} names for a tensor of rank ${rank}"
+            )
+
+        dimNames.clear()
+        return names.mapIndexed { i, s ->
+            dimNames[s] = i
+            Dimension(s)
+        }
+    }
+
+    operator fun get(name: String) = if (name in dimNames) Dimension(name) else
+        throw IllegalArgumentException("Dimension $name not defined.  Use Tensor.define() to name dimensions.")
+
+    operator fun get(index: Int) = dimNames.entries
+        .firstOrNull { it.value == index }?.let { Dimension(it.key) }
+        ?: throw IllegalArgumentException("Dimension with index $index not defined.  Use Tensor.define() to name dimensions.")
+
+    operator fun component1() =
+        this[0]
+
+    operator fun component2() =
+        this[1]
+
+    operator fun component3() =
+        this[2]
+
+    operator fun component4() =
+        this[3]
+
+    operator fun component5() =
+        this[4]
+
+    operator fun component6() =
+        this[5]
+
+
+    // updating/adding vertices
+
+    @GraphBuilderDSL
+    fun updateVertex(update: (GraphVertex) -> GraphVertex) {
+        vertex = update(vertex)
+    }
+
+    @GraphBuilderDSL
+    fun updateVertex(update: IHasLayers, vararg otherInputs: GraphVertex = emptyArray()) {
+        update.layers.forEach {
+            updateVertex { vertex ->
+                LayerVertex(it, listOf(vertex) + otherInputs)
+            }
+        }
+    }
+
+    @GraphBuilderDSL
+    fun updateVertex(update: WrapperVertex<*>, vararg otherInputs: GraphVertex = emptyArray()) {
+        updateVertex {
+            VertexWrapper(update, listOf(it) + otherInputs)
+        }
+    }
+
+    @GraphBuilderDSL
+    fun updateVertex(update: CustomVertex, vararg otherInputs: GraphVertex = emptyArray()) {
+        updateVertex {
+            update.create(listOf(it) + otherInputs)
+        }
+    }
+
+
+    @GraphBuilderDSL
+    operator fun IHasLayers.unaryPlus() = updateVertex(this)
+
+    @GraphBuilderDSL
+    operator fun WrapperVertex<*>.unaryPlus() = updateVertex(this)
+
+    @GraphBuilderDSL
+    operator fun CustomVertex.unaryPlus() = updateVertex(this)
+
+
+    @GraphBuilderDSL
+    operator fun get(vararg layers: IHasLayers) = layers.forEach { +it }
+
+    @GraphBuilderDSL
+    operator fun get(vararg vertices: WrapperVertex<*>) = vertices.forEach { +it }
+
+    @GraphBuilderDSL
+    operator fun get(vararg vertices: CustomVertex) = vertices.forEach { +it }
+
+    @GraphBuilderDSL
+    operator fun invoke(body: Tensor.() -> Unit) {
+        this.apply(body)
+    }
+
+    // shape operations
+
+    @GraphBuilderDSL
+    fun reshape(vararg shape: Int, name: String = "reshape") = +ReshapeVertex(*shape, name = name)
+
+    @GraphBuilderDSL
+    fun reshape(vararg shape: Pair<String, Int>, name: String = "reshape"): List<Dimension> {
+        +ReshapeVertex(*shape.map { it.second }.toIntArray(), name = name)
+        return define(*shape.map { it.first }.toTypedArray())
+    }
+
+    @GraphBuilderDSL
+    fun flatten(
+        reshapeOrder: ReshapeVertex.ReshapeOrder = ReshapeVertex.ReshapeOrder.RowMajor,
+        name: String = "flatten"
+    ) = +FlattenVertex(reshapeOrder, name)
+
+    @GraphBuilderDSL
+    fun permute(vararg shape: Int, name: String = "permute") = +PermuteLayer(*shape, name = name)
+
+    @GraphBuilderDSL
+    fun permute(vararg shape: String, name: String = "permute") = +PermuteLayer(
+        *shape.map {
+            this[it].index
+        }.toIntArray(),
+        name = name
+    )
+
+    @GraphBuilderDSL
+    fun permute(vararg shape: Dimension, name: String = "permute") =
+        +PermuteLayer(*shape.map { it.index }.toIntArray(), name = name)
+
+    @GraphBuilderDSL
+    fun cropIndexed(vararg croppings: Pair<Int, Param2>, name: String = "cropping") {
+        val map = croppings.toMap()
+        +CroppingLayer((0 until rank).map { if (it in map) map.getValue(it) else 0.p2 }, name)
+    }
+
+    @GraphBuilderDSL
+    fun cropNamed(vararg croppings: Pair<String, Param2>, name: String = "cropping") {
+        val map = croppings.toMap().mapKeys {
+            this[it.key].index
+        }
+        cropIndexed(*map.toList().toTypedArray(), name = name)
+    }
+
+    @GraphBuilderDSL
+    fun crop(vararg croppings: Pair<Dimension, Param2>, name: String = "cropping") {
+        val map = croppings.toMap().mapKeys {
+            it.key.index
+        }
+        cropIndexed(*map.toList().toTypedArray(), name = name)
+    }
+
+    @GraphBuilderDSL
+    fun crop(dimension: Int, cropping: Param2, name: String = "cropping") =
+        cropIndexed(dimension to cropping, name = name)
+
+    @GraphBuilderDSL
+    fun crop(dimension: String, cropping: Param2, name: String = "cropping") =
+        cropNamed(dimension to cropping, name = name)
+
+    @GraphBuilderDSL
+    fun crop(dimension: Dimension, cropping: Param2, name: String = "cropping") =
+        crop(dimension to cropping, name = name)
+
+    @GraphBuilderDSL
+    fun crop(dimension: Int, before: Int, after: Int, name: String = "cropping") =
+        cropIndexed(dimension to P(before, after), name = name)
+
+    @GraphBuilderDSL
+    fun crop(dimension: String, before: Int, after: Int, name: String = "cropping") =
+        cropNamed(dimension to P(before, after), name = name)
+
+    @GraphBuilderDSL
+    fun crop(dimension: Dimension, before: Int, after: Int, name: String = "cropping") =
+        crop(dimension to P(before, after), name = name)
+
+    @GraphBuilderDSL
+    fun distribute(dimension: Int, name: String = "distribute", body: Tensor.() -> Unit) {
+        val size = shape[dimension]
+        +DistributeDimensionLayer(dimension, name = name + "_distribute")
+        body()
+        +CollateDimensionLayer(dimension, size, name + "_collate")
+    }
+
+    // samediff lambdas
+
+    fun samediff(
+        outputShape: (List<Int>) -> List<Int> = { it },
+        name: String = "lambda",
+        lambda: SameDiffLambdaDef.(SDVariable) -> SDVariable
+    ) =
+        +SameDiffLambdaLayer(name, outputShape, lambda)
+
+    //TODO multiple input samediffs (needs implementation)
+
+    // merging inplace
+
+    operator fun plusAssign(other: Tensor) = updateVertex(AddVertex(), other.vertex)
+    operator fun minusAssign(other: Tensor) = updateVertex(SubtractVertex(), other.vertex)
+    operator fun timesAssign(other: Tensor) = updateVertex(MultiplyVertex(), other.vertex)
+
+    @GraphBuilderDSL
+    infix fun inplaceAverage(other: Tensor) = updateVertex(AverageVertex(), other.vertex)
+
+    @GraphBuilderDSL
+    infix fun inplaceMax(other: Tensor) = updateVertex(MaxVertex(), other.vertex)
+
+    operator fun remAssign(other: Tensor) = inplaceConcat(other)
+    operator fun remAssign(other: Pair<Int, Tensor>) = inplaceConcat(other.first, other.second)
+
+    @GraphBuilderDSL
+    infix fun inplaceConcat(other: Tensor) {
+        updateVertex(MergeVertex(), other.vertex)
+    }
+
+    @GraphBuilderDSL
+    fun inplaceConcat(dimension: Int, other: Tensor) {
+        val dims = (0 until rank).toList()
+        permute(dimension, *dims.minus(dimension).toIntArray())
+        val o = other.dup().apply { permute(dimension, *dims.minus(dimension).toIntArray()) }
+        inplaceConcat(o)
+        permute(*reversePermutation(dimension, *dims.minus(dimension).toIntArray()))
+    }
+
+    @GraphBuilderDSL
+    fun inplaceConcat(dimension: Dimension, other: Tensor) = inplaceConcat(dimension.index, other)
+
+    @GraphBuilderDSL
+    fun inplaceConcat(dimension: String, other: Tensor) = inplaceConcat(this[dimension].index, other)
+
+    operator fun plusAssign(others: List<Tensor>) = updateVertex(AddVertex(), *others.map { it.vertex }.toTypedArray())
+
+    operator fun minusAssign(others: List<Tensor>) =
+        updateVertex(SubtractVertex(), *others.map { it.vertex }.toTypedArray())
+
+    operator fun timesAssign(others: List<Tensor>) =
+        updateVertex(MultiplyVertex(), *others.map { it.vertex }.toTypedArray())
+
+    @GraphBuilderDSL
+    infix fun inplaceAverage(others: List<Tensor>) =
+        updateVertex(AverageVertex(), *others.map { it.vertex }.toTypedArray())
+
+    @GraphBuilderDSL
+    infix fun inplaceMax(others: List<Tensor>) = updateVertex(MaxVertex(), *others.map { it.vertex }.toTypedArray())
+
+    operator fun remAssign(others: List<Tensor>) = inplaceConcat(others)
+
+    @GraphBuilderDSL
+    infix fun inplaceConcat(others: List<Tensor>) {
+        updateVertex(MergeVertex(), *others.map { it.vertex }.toTypedArray())
+    }
+
+    @GraphBuilderDSL
+    fun inplaceConcat(dimension: Int, others: List<Tensor>) {
+        val dims = (0 until rank).toList()
+        permute(dimension, *dims.minus(dimension).toIntArray())
+        val o = others.map { it.dup().apply { permute(dimension, *dims.minus(dimension).toIntArray()) } }
+        inplaceConcat(o)
+        permute(*reversePermutation(dimension, *dims.minus(dimension).toIntArray()))
+    }
+
+    @GraphBuilderDSL
+    fun inplaceConcat(dimension: Dimension, others: List<Tensor>) = inplaceConcat(dimension.index, others)
+
+    @GraphBuilderDSL
+    fun inplaceConcat(dimension: String, others: List<Tensor>) = inplaceConcat(this[dimension].index, others)
+
+    // merging not in place
+
+    operator fun plus(other: Tensor) = Tensor(AddVertex(), this, other)
+    operator fun minus(other: Tensor) = Tensor(SubtractVertex(), this, other)
+    operator fun times(other: Tensor) = Tensor(MultiplyVertex(), this, other)
+
+    @GraphBuilderDSL
+    infix fun average(other: Tensor) = Tensor(AverageVertex(), this, other)
+
+    @GraphBuilderDSL
+    infix fun max(other: Tensor) = Tensor(AverageVertex(), this, other)
+
+
+    @GraphBuilderDSL
+    infix fun concat(other: Tensor) = Tensor(MergeVertex(), this, other)
+
+    @GraphBuilderDSL
+    fun concat(dimension: Int, other: Tensor) = dup().apply {
+        inplaceConcat(dimension, other)
+    }
+
+    @GraphBuilderDSL
+    fun concat(dimension: Dimension, other: Tensor) = dup().apply {
+        inplaceConcat(dimension, other)
+    }
+
+    @GraphBuilderDSL
+    fun concat(dimension: String, other: Tensor) = dup().apply {
+        inplaceConcat(dimension, other)
+    }
+
+    operator fun rem(other: Tensor) = concat(other)
+    operator fun rem(other: Pair<Int, Tensor>) = concat(other.first, other.second)
+
+
+    operator fun plus(others: List<Tensor>) = Tensor(AddVertex(), listOf(this) + others)
+    operator fun minus(others: List<Tensor>) = Tensor(SubtractVertex(), listOf(this) + others)
+    operator fun times(others: List<Tensor>) = Tensor(MultiplyVertex(), listOf(this) + others)
+
+    @GraphBuilderDSL
+    infix fun average(others: List<Tensor>) = Tensor(AverageVertex(), listOf(this) + others)
+
+    @GraphBuilderDSL
+    infix fun max(others: List<Tensor>) = Tensor(AverageVertex(), listOf(this) + others)
+
+
+    @GraphBuilderDSL
+    infix fun concat(others: List<Tensor>) = Tensor(MergeVertex(), this, *others.toTypedArray())
+
+    @GraphBuilderDSL
+    fun concat(dimension: Int, others: List<Tensor>) = dup().apply {
+        inplaceConcat(dimension, others)
+    }
+
+    @GraphBuilderDSL
+    fun concat(dimension: Dimension, others: List<Tensor>) = dup().apply {
+        inplaceConcat(dimension, others)
+    }
+
+    @GraphBuilderDSL
+    fun concat(dimension: String, others: List<Tensor>) = dup().apply {
+        inplaceConcat(dimension, others)
+    }
+
+    operator fun rem(others: List<Tensor>) = concat(others)
+
+}
+
+@GraphBuilderDSL
+fun graph(body: ComputationGraph.() -> Unit) = ComputationGraph(body)
+
+class ComputationGraph() {
+
+    constructor(body: ComputationGraph.() -> Unit) : this() {
+        invoke(body)
     }
 
     //TODO graph vars
     var optimizer: IUpdater = Updater.SGD.iUpdaterWithDefaultConfig
 
-    private var _lastAdded: GraphVertex? = null
-
-    @GraphBuilderDSL
-    var currentVertex
-        get() = _lastAdded ?: throw IllegalStateException("No vertices have been added")
-        set(v){ _lastAdded = v }
-
-    @GraphBuilderDSL
-    fun from(vertex: GraphVertex, isolate: Boolean = true, builder: ComplexNetwork.() -> Unit){
-        if(isolate){
-            val old = currentVertex
-            currentVertex = vertex
-            builder()
-            currentVertex = old
-        } else {
-            currentVertex = vertex
-            builder()
-        }
-    }
-
-    @GraphBuilderDSL
-    infix fun GraphVertex.thenChain(builder: ComplexNetwork.() -> Unit) = from(this, true, builder)
-
-    @GraphBuilderDSL
-    infix fun GraphVertex.thenChainNonIsolated(builder: ComplexNetwork.() -> Unit) = from(this, false, builder)
-
     private val inputs = mutableSetOf<Input>()
 
-    private val vertices = mutableMapOf<String, GraphVertex>()
-
-    operator fun get(name: String) = vertices[name]
-    fun getByName(name: String) = this[name]
-
-    val outputs: MutableList<GraphVertex> = mutableListOf()
+    val outputs: MutableList<Tensor> = mutableListOf()
 
     @GraphBuilderDSL
-    fun outputs(vararg outputs: GraphVertex) {
+    fun outputs(vararg outputs: Tensor) {
         this.outputs.addAll(outputs.toList())
     }
 
     @GraphBuilderDSL
-    operator fun GraphVertex.not(): GraphVertex = this.also { outputs(this) }
+    operator fun Tensor.not() = outputs(this)
 
     @GraphBuilderDSL
-    operator fun invoke(builder: ComplexNetwork.() -> Unit): ComplexNetwork = this.also(builder)
-
-    @GraphBuilderDSL
-    fun input(name: String, shape: List<Int>) = +Input(name, shape).also {
+    fun input(name: String, shape: List<Int>) = Input(name, shape).let {
         inputs.add(it)
+        Tensor(it)
     }
 
     @GraphBuilderDSL
     fun input(name: String, vararg shape: Int) = input(name, shape.toList())
 
     @GraphBuilderDSL
-    operator fun Input.unaryPlus(): Input {
-        this@ComplexNetwork.inputs.add(this)
-        addVertex(this)
-        return this
-    }
-
-    @GraphBuilderDSL
-    fun addVertex(vertex: GraphVertex): GraphVertex {
-        if (vertex.name in vertices)
-            throw IllegalArgumentException("Vertex with name ${vertex.name} already present in graph")
-
-        vertices[vertex.name] = vertex
-        _lastAdded = vertex
-        return vertex
-    }
-
-    @GraphBuilderDSL
-    fun addVertex(vertex: WrapperVertex<*>, inputs: List<GraphVertex>): GraphVertex =
-        addVertex(VertexWrapper(vertex, inputs))
-
-    @GraphBuilderDSL
-    fun addVertex(vertex: CustomVertex, inputs: List<GraphVertex>): GraphVertex =
-        addVertex(vertex.create(inputs))
-
-
-    @GraphBuilderDSL
-    fun addVertex(vertex: WrapperVertex<*>, vararg inputs: GraphVertex): GraphVertex =
-        addVertex(vertex, inputs.toList())
-
-    @GraphBuilderDSL
-    fun addVertex(vertex: CustomVertex, vararg inputs: GraphVertex): GraphVertex =
-        addVertex(vertex, inputs.toList())
-
-    @GraphBuilderDSL
-    operator fun WrapperVertex<*>.unaryPlus() = addVertex(this, currentVertex)
-
-    @GraphBuilderDSL
-    operator fun CustomVertex.unaryPlus() = addVertex(this, currentVertex)
-
-
-    @GraphBuilderDSL
-    fun List<GraphVertex>.then(vertex: WrapperVertex<*>) = addVertex(vertex, this)
-
-    @GraphBuilderDSL
-    fun GraphVertex.then(vertex: WrapperVertex<*>) = addVertex(vertex, this)
-
-    @GraphBuilderDSL
-    infix fun WrapperVertex<*>.from(inputs: List<GraphVertex>) = addVertex(this, inputs)
-
-    @GraphBuilderDSL
-    infix fun WrapperVertex<*>.from(inputs: GraphVertex) = addVertex(this, inputs)
-
-    @GraphBuilderDSL
-    fun WrapperVertex<*>.from(vararg inputs: GraphVertex) = addVertex(this, *inputs)
-
-
-    @GraphBuilderDSL
-    fun List<GraphVertex>.then(vertex: CustomVertex) = addVertex(vertex, this)
-
-    @GraphBuilderDSL
-    fun GraphVertex.then(vertex: CustomVertex) = addVertex(vertex, this)
-
-    @GraphBuilderDSL
-    infix fun CustomVertex.from(inputs: List<GraphVertex>) = addVertex(this, inputs)
-
-    @GraphBuilderDSL
-    infix fun CustomVertex.from(inputs: GraphVertex) = addVertex(this, inputs)
-
-    @GraphBuilderDSL
-    fun CustomVertex.from(vararg inputs: GraphVertex) = addVertex(this, *inputs)
-
-
-    @GraphBuilderDSL
-    operator fun GraphVertex.unaryPlus(): GraphVertex = addVertex(this)
-
-    @GraphBuilderDSL
-    fun addLayer(layer: ILayer, inputs: List<GraphVertex>): LayerVertex {
-        return LayerVertex(layer, inputs).also { +it }
-    }
-
-    @GraphBuilderDSL
-    fun addLayer(layer: ILayer, vararg inputs: GraphVertex) = addLayer(layer, inputs.toList())
-
-    @GraphBuilderDSL
-    fun addLayers(layers: List<ILayer>, inputs: List<GraphVertex>): LayerVertex {
-        var layerInput = LayerVertex(layers.first(), inputs)
-
-        addVertex(layerInput)
-
-        layers.drop(1).forEach {
-            layerInput = it from layerInput
+    fun input(name: String, vararg shape: Pair<String, Int>) =
+        input(name, shape.toList().map { it.second }).also {
+            it.define(*shape.map { it.first }.toTypedArray())
         }
 
-        return layerInput
-    }
+    operator fun invoke(body: ComputationGraph.() -> Unit) = this.apply(body)
 
-    @GraphBuilderDSL
-    fun addLayers(layers: List<ILayer>, vararg inputs: GraphVertex) = addLayers(layers, inputs.toList())
+    fun build(graphConfig: ComputationGraphConfiguration.GraphBuilder.() -> Unit = {}): DL4JComputationGraph {
+        val vertices = mutableListOf<GraphVertex>()
 
-    @GraphBuilderDSL
-    fun addLayers(layers: IHasLayers, inputs: List<GraphVertex>) = addLayers(layers.layers, inputs)
+        val temp = mutableSetOf(*outputs.map { it.vertex }.toTypedArray())
+        val temp2 = mutableSetOf<GraphVertex>()
 
-    @GraphBuilderDSL
-    fun addLayers(layers: IHasLayers, vararg inputs: GraphVertex) = addLayers(layers, inputs.toList())
+        do {
+            temp2.clear()
 
-    @GraphBuilderDSL
-    fun addLayers(inputs: List<GraphVertex>, vararg layers: ILayer) = addLayers(layers.toList(), inputs)
+            temp.forEach {
+                vertices.add(it)
+                temp2.addAll((it.inputs ?: emptyList()).filter { it !in vertices })
+            }
 
+            temp.clear()
+            temp.addAll(temp2)
+        } while (temp.isNotEmpty())
 
-    @GraphBuilderDSL
-    operator fun IHasLayers.unaryPlus() = addLayers(this, currentVertex)
+        val graphBuilder = NeuralNetConfiguration.Builder()
+            .updater(optimizer)
+            .graphBuilder()
+            .apply(graphConfig)
 
-
-    @GraphBuilderDSL
-    fun List<GraphVertex>.then(vararg layers: ILayer) = addLayers(this, *layers)
-
-    @GraphBuilderDSL
-    fun GraphVertex.then(vararg layers: ILayer) = addLayers(listOf(this), *layers)
-
-    @GraphBuilderDSL
-    infix fun List<GraphVertex>.then(layers: List<ILayer>) = addLayers(layers, this)
-
-    @GraphBuilderDSL
-    infix fun GraphVertex.then(layers: List<ILayer>) = addLayers(layers, this)
-
-    @GraphBuilderDSL
-    infix fun List<GraphVertex>.then(layers: IHasLayers) = addLayers(layers, this)
-
-    @GraphBuilderDSL
-    infix fun GraphVertex.then(layers: IHasLayers) = addLayers(layers, this)
-
-
-    @GraphBuilderDSL
-    infix fun List<ILayer>.from(inputs: List<GraphVertex>) = addLayers(this, inputs)
-
-    @GraphBuilderDSL
-    infix fun List<ILayer>.from(inputs: GraphVertex) = addLayers(this, inputs)
-
-    @GraphBuilderDSL
-    infix fun IHasLayers.from(inputs: List<GraphVertex>) = addLayers(this, inputs)
-
-    @GraphBuilderDSL
-    infix fun IHasLayers.from(inputs: GraphVertex) = addLayers(this, inputs)
-
-    @GraphBuilderDSL
-    fun IHasLayers.from(vararg inputs: GraphVertex) = addLayers(this, *inputs)
-
-    @GraphBuilderDSL
-    fun lambda(name: String = "lambda", lambda: SameDiffLambda) =
-        +SameDiffLambdaLayer(name, lambda)
-
-
-    @GraphBuilderDSL
-    fun distributedOver(input: GraphVertex, dimension: Int, body: ComplexNetwork.() -> Unit): GraphVertex {
-        input then DistributeDimensionLayer(dimension)
-        val size = input.outputShape[dimension]
-        body()
-        return +CollateDimensionLayer(dimension, size)
-    }
-
-    @GraphBuilderDSL
-    fun GraphVertex.thenDistributedOver(dimension: Int, body: ComplexNetwork.() -> Unit) =
-        distributedOver(this, dimension, body)
-
-    @GraphBuilderDSL
-    fun distributedOver(dimension: Int, body: ComplexNetwork.() -> Unit) =
-            distributedOver(currentVertex, dimension, body)
-
-    fun ends() = vertices.values.filter { vert ->
-        vertices.values.none { it.inputs != null && vert in it.inputs!! }
-    }
-
-    //TODO can I get vertex by name?  probably not
-
-    fun makeGraph(config: ComputationGraphConfiguration.GraphBuilder.() -> ComputationGraphConfiguration.GraphBuilder = { this }):
-            ComputationGraphConfiguration {
-        val graphBuilder = NeuralNetConfiguration.Builder().updater(optimizer).graphBuilder().config()
+        vertices.reverse()
 
         inputs.forEach {
             it.add(graphBuilder)
-
         }
 
-        (vertices.values - inputs).forEach {
+        (vertices.filter { it !in inputs }).forEach {
             it.add(graphBuilder)
         }
 
         if (outputs.isEmpty())
             throw IllegalStateException("No outputs defined")
         else
-            graphBuilder.setOutputs(*outputs.map { it.name }.toTypedArray())
+            graphBuilder.setOutputs(*outputs.map { it.vertex.name }.toTypedArray())
 
-        return graphBuilder.build()
+        return DL4JComputationGraph(graphBuilder.build())
     }
+}
 
-//    fun summary(): String{
-//        //TODO output methods
-//    }
+fun main() {
+    val graph = graph {
+        val image = input("image", "depth" to 1, "height" to 28, "depth" to 28)
+
+        image.reshape(1, 28, 28)
+
+        image {
+            +Convolution2DLayer(20, 5.p2) { activation = ActivationLReLU() }
+            +Subsampling2DLayer(kernelSize = 2.p2, stride = 2.p2)
+
+            +Convolution2DLayer(20, 5.p2) { activation = ActivationLReLU() }
+            +Subsampling2DLayer(kernelSize = 2.p2, stride = 2.p2)
+
+            flatten()
+
+            +DenseLayer(200) { activation = ActivationLReLU() }
+
+            +OutputLayer(10, loss = LossNegativeLogLikelihood()) { activation = ActivationSoftmax() }
+        }
+
+        outputs(image)
+    }
 }

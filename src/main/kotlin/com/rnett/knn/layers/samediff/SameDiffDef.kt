@@ -7,10 +7,7 @@ import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
 //TODO don't allow param refs for lambda layers
-class SameDiffDef(val SD: SameDiff, val input: SDVariable, val params: Map<String, SDVariable>) {
-    val inputShape = input.shape.drop(1).toList().map { it.toInt() }
-    val batchSize = input.shape[0]
-
+open class SameDiffLambdaDef(val SD: SameDiff) {
     operator fun SDVariable.unaryMinus(): SDVariable = this.neg()
 
     operator fun SDVariable.plus(other: SDVariable): SDVariable = this.add(other)
@@ -78,7 +75,9 @@ class SameDiffDef(val SD: SameDiff, val input: SDVariable, val params: Map<Strin
             }
         }.toTypedArray()
     )
+}
 
+class SameDiffDef(SD: SameDiff, val params: Map<String, SDVariable>) : SameDiffLambdaDef(SD) {
     inner class SDVarDelegate internal constructor(val name: String?) : ReadOnlyProperty<Any?, SDVariable> {
         override fun getValue(thisRef: Any?, property: KProperty<*>): SDVariable {
             return params[name ?: property.name]!!

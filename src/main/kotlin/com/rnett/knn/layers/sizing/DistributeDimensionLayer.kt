@@ -2,7 +2,6 @@ package com.rnett.knn.layers.sizing
 
 import com.rnett.knn.layers.samediff.SameDiffDef
 import com.rnett.knn.layers.samediff.SameDiffLayer
-import org.deeplearning4j.nn.graph.vertex.impl.PreprocessorVertex
 import org.nd4j.autodiff.samediff.SDVariable
 
 //TODO check that things end up in the same spots
@@ -23,7 +22,13 @@ class DistributeDimensionLayer(
             .map { it.toLong() }.drop(1).toLongArray()
         )
 
-        return SD.reshape(SD.permute(input, *newOrder.toIntArray()), *newShape)
+        val permuted = if (dimension == 0) {
+            input
+        } else {
+            SD.permute(input, *newOrder.toIntArray())
+        }
+
+        return SD.reshape(permuted, *newShape)
     }
 
     override fun outputShape(inputShape: List<Int>) =
@@ -45,14 +50,18 @@ class CollateDimensionLayer(
             size.toLong(), *input.shape.drop(1).toLongArray()
         )
 
-        val newDims = intArrayOf(
-            0,
-            *(2..(dimension+1)).toList().toIntArray(),
-            1,
-            *((dimension+2) until input.shape.size+1).toList().toIntArray()
-        )
+        if (dimension == 0) {
+            return SD.reshape(input, *newShape)
+        } else {
+            val newDims = intArrayOf(
+                0,
+                *(2..(dimension + 1)).toList().toIntArray(),
+                1,
+                *((dimension + 2) until input.shape.size + 1).toList().toIntArray()
+            )
 
-        return SD.permute(SD.reshape(input, *newShape), *newDims)
+            return SD.permute(SD.reshape(input, *newShape), *newDims)
+        }
     }
 
     override fun outputShape(inputShape: List<Int>) =

@@ -1,11 +1,8 @@
 package com.rnett.knn.layers.samediff
 
 import com.rnett.knn.layers.Layer
-import org.deeplearning4j.nn.conf.inputs.InputType
-import org.deeplearning4j.nn.conf.layers.samediff.SDLayerParams
 import org.deeplearning4j.nn.weights.WeightInit
 import org.nd4j.autodiff.samediff.SDVariable
-import org.nd4j.autodiff.samediff.SameDiff
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.learning.config.IUpdater
 import org.deeplearning4j.nn.conf.layers.samediff.AbstractSameDiffLayer as DL4JAbstractSameDiffLayer
@@ -90,7 +87,7 @@ abstract class SameDiffLayer(
 fun SameDiffLambdaLayer(
     name: String = "lambda",
     outputShape: (List<Int>) -> List<Int>,
-    defineLayer: SameDiffDef.(input: SDVariable) -> SDVariable
+    defineLayer: SameDiffLambdaDef.(input: SDVariable) -> SDVariable
 ) =
     object : SameDiffLayer(name, {}) {
         override fun SameDiffDef.defineLayer(input: SDVariable) = defineLayer(input)
@@ -101,6 +98,6 @@ fun SameDiffLambdaLayer(
 
 fun SameDiffLambdaLayer(
     name: String = "lambda",
-    defineLayer: SameDiffDef.(input: SDVariable) -> SDVariable
+    defineLayer: SameDiffLambdaDef.(input: SDVariable) -> SDVariable
 ) =
     SameDiffLambdaLayer(name, { it }, defineLayer)

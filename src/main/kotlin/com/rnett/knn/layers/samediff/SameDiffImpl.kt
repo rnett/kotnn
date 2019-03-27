@@ -7,6 +7,7 @@ import org.nd4j.autodiff.samediff.SDVariable
 import org.nd4j.autodiff.samediff.SameDiff
 import org.nd4j.linalg.api.ndarray.INDArray
 
+//TODO serialization support
 class SameDiffImpl(
     builder: KNNSameDiffLayerBuilder,
     val defineLayer: SameDiffDef.(input: SDVariable) -> SDVariable,
@@ -20,7 +21,7 @@ class SameDiffImpl(
         layerInput: SDVariable,
         paramTable: MutableMap<String, SDVariable>
     ): SDVariable {
-        return SameDiffDef(sameDiff, layerInput, paramTable).defineLayer(layerInput)
+        return SameDiffDef(sameDiff, paramTable).defineLayer(layerInput)
     }
 
     override fun defineParameters(params: SDLayerParams) {

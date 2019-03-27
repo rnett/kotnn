@@ -85,6 +85,7 @@ class PreprocessorVertex(val preprocessor: InputPreProcessor, name: String = "pr
 
 }
 
+
 class MergeVertex(name: String = "merge_${vertexCount++}") :
     WrapperVertex<DL4JMergeVertex>(name) {
     override fun makeVertex() = DL4JMergeVertex()
