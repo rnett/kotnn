@@ -3,6 +3,7 @@ package com.rnett.knn.models
 import com.rnett.knn.enforceLength
 import com.rnett.knn.layers.ILayer
 import com.rnett.knn.layers.inferInputType
+import com.rnett.knn.layers.makeNameUnique
 import org.deeplearning4j.nn.conf.ComputationGraphConfiguration
 import org.deeplearning4j.nn.conf.InputPreProcessor
 import org.deeplearning4j.nn.conf.graph.ElementWiseVertex as DL4JElementWiseVertex
@@ -12,7 +13,10 @@ import org.deeplearning4j.nn.conf.graph.PreprocessorVertex as DL4JPreprocessorVe
 import org.deeplearning4j.nn.conf.graph.ReshapeVertex as DL4JReshapeVertex
 import org.deeplearning4j.nn.conf.graph.SubsetVertex as DL4JSubsetVertex
 
-sealed class GraphVertex(open val name: String, open val inputs: List<GraphVertex>?) {
+sealed class GraphVertex(name: String, open val inputs: List<GraphVertex>?) {
+
+    val name = makeNameUnique(name)
+
     open fun add(graph: ComputationGraphConfiguration.GraphBuilder) {
         graph.addVertex(name, makeVertex(), *(inputs ?: emptyList()).map { it.name }.toTypedArray())
     }
@@ -45,7 +49,7 @@ data class LayerVertex(val layer: ILayer, override val inputs: List<GraphVertex>
     }
 }
 
-data class Input(override val name: String, val shape: List<Int>) : GraphVertex(name, null) {
+class Input(name: String, val shape: List<Int>) : GraphVertex(name, null) {
     override fun add(graph: ComputationGraphConfiguration.GraphBuilder) {
         graph.addInputs(listOf(name))
         val type = shape.inferInputType()
@@ -69,13 +73,13 @@ data class VertexWrapper(
 
 }
 
-sealed class WrapperVertex<T : DL4JVertex>(val name: String = "wrapper_${vertexCount++}") {
+sealed class WrapperVertex<T : DL4JVertex>(val name: String = "wrapper") {
     abstract fun outputShape(inputShapes: List<List<Int>>): List<Int>
     open fun makeVertex(inputShapes: List<List<Int>>): T = makeVertex()
     abstract fun makeVertex(): T
 }
 
-class PreprocessorVertex(val preprocessor: InputPreProcessor, name: String = "preprocessor_${vertexCount++}") :
+class PreprocessorVertex(val preprocessor: InputPreProcessor, name: String = "preprocessor") :
     WrapperVertex<DL4JPreprocessorVertex>(name) {
 
     override fun outputShape(inputShapes: List<List<Int>>) =
@@ -86,7 +90,7 @@ class PreprocessorVertex(val preprocessor: InputPreProcessor, name: String = "pr
 }
 
 
-class MergeVertex(name: String = "merge_${vertexCount++}") :
+class MergeVertex(name: String = "merge") :
     WrapperVertex<DL4JMergeVertex>(name) {
     override fun makeVertex() = DL4JMergeVertex()
 
@@ -110,7 +114,7 @@ class MergeVertex(name: String = "merge_${vertexCount++}") :
 class SubsetVertex(
     val start: Int,
     val end: Int,
-    name: String = "subset_${vertexCount++}"
+    name: String = "subset"
 ) :
     WrapperVertex<DL4JSubsetVertex>(name) {
 
@@ -126,7 +130,7 @@ class SubsetVertex(
 
 class ElementWiseVertex(
     val operation: DL4JElementWiseVertex.Op,
-    name: String = "elemtwise_${operation}_${vertexCount++}"
+    name: String = "elemtwise"
 ) :
     WrapperVertex<DL4JElementWiseVertex>(name) {
     override fun makeVertex() = DL4JElementWiseVertex(operation)
@@ -143,27 +147,27 @@ class ElementWiseVertex(
 }
 
 object AddVertex {
-    operator fun invoke(name: String = "elemtwise_Add_${vertexCount++}") =
+    operator fun invoke(name: String = "elemtwise_Add") =
         ElementWiseVertex(org.deeplearning4j.nn.conf.graph.ElementWiseVertex.Op.Add, name)
 }
 
 object SubtractVertex {
-    operator fun invoke(name: String = "elemtwise_Subtract_${vertexCount++}") =
+    operator fun invoke(name: String = "elemtwise_Subtract") =
         ElementWiseVertex(org.deeplearning4j.nn.conf.graph.ElementWiseVertex.Op.Subtract, name)
 }
 
 object MultiplyVertex {
-    operator fun invoke(name: String = "elemtwise_Product_${vertexCount++}") =
+    operator fun invoke(name: String = "elemtwise_Product") =
         ElementWiseVertex(org.deeplearning4j.nn.conf.graph.ElementWiseVertex.Op.Product, name)
 }
 
 object AverageVertex {
-    operator fun invoke(name: String = "elemtwise_Average_${vertexCount++}") =
+    operator fun invoke(name: String = "elemtwise_Average") =
         ElementWiseVertex(org.deeplearning4j.nn.conf.graph.ElementWiseVertex.Op.Average, name)
 }
 
 object MaxVertex {
-    operator fun invoke(name: String = "elemtwise_Max_${vertexCount++}") =
+    operator fun invoke(name: String = "elemtwise_Max") =
         ElementWiseVertex(org.deeplearning4j.nn.conf.graph.ElementWiseVertex.Op.Max, name)
 }
 
@@ -172,11 +176,11 @@ object MaxVertex {
 class ReshapeVertex(
     val shape: List<Int>,
     val reshapeOrder: ReshapeOrder = ReshapeOrder.RowMajor,
-    name: String = "reshape_${vertexCount++}"
+    name: String = "reshape"
 ) :
     WrapperVertex<DL4JReshapeVertex>(name) {
 
-    constructor(vararg shape: Int, name: String = "reshape_${vertexCount++}") : this(
+    constructor(vararg shape: Int, name: String = "reshape") : this(
         shape.toList(),
         ReshapeOrder.RowMajor,
         name
@@ -206,7 +210,7 @@ class ReshapeVertex(
 
 class FlattenVertex(
     val reshapeOrder: ReshapeVertex.ReshapeOrder = ReshapeVertex.ReshapeOrder.RowMajor,
-    name: String = "reshape_${vertexCount++}"
+    name: String = "reshape"
 ) :
     WrapperVertex<DL4JReshapeVertex>(name) {
 
@@ -233,7 +237,7 @@ interface CustomVertex {
 
 class AddDimensionVertex(
     val reshapeOrder: ReshapeVertex.ReshapeOrder = ReshapeVertex.ReshapeOrder.RowMajor,
-    val name: String = "reshape_${vertexCount++}"
+    val name: String = "reshape"
 ) : CustomVertex {
     override fun create(inputs: List<GraphVertex>) = VertexWrapper(
         ReshapeVertex(
@@ -246,7 +250,7 @@ class AddDimensionVertex(
 
 class RemoveDegenerateDimensionVertex(
     val reshapeOrder: ReshapeVertex.ReshapeOrder = ReshapeVertex.ReshapeOrder.RowMajor,
-    val name: String = "reshape_${vertexCount++}"
+    val name: String = "reshape"
 ) : CustomVertex {
 
     override fun create(inputs: List<GraphVertex>): GraphVertex {

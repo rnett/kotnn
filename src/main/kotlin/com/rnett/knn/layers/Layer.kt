@@ -74,6 +74,16 @@ interface IKNNLayer<out T : DL4JLayer> : ILayer {
 
 private val nameCount = mutableMapOf<String, Int>().withDefault { 0 }
 
+internal fun makeNameUnique(name: String) =
+    run {
+        if (name in nameCount)
+            "${name}_${nameCount[name]!!}"
+        else
+            name
+    }.also {
+        nameCount[name] = nameCount.getOrDefault(name, 0) + 1
+    }
+
 abstract class Layer<out T : DL4JLayer, S : Layer<T, S>>(
     givenName: String
 ) : IKNNLayer<T> {
@@ -90,14 +100,7 @@ abstract class Layer<out T : DL4JLayer, S : Layer<T, S>>(
     override var name: String
         get() = trueName
         set(givenName) {
-            trueName = run {
-                if (givenName in nameCount)
-                    "${givenName}_${nameCount[givenName]!!}"
-                else
-                    givenName
-            }.also {
-                nameCount[givenName] = nameCount.getOrDefault(givenName, 0) + 1
-            }
+            trueName = makeNameUnique(givenName)
         }
 
     var dropout: IDropout? = null

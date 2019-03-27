@@ -11,11 +11,21 @@ import org.junit.Test
 import org.nd4j.evaluation.classification.Evaluation
 import org.nd4j.linalg.activations.impl.ActivationLReLU
 import org.nd4j.linalg.activations.impl.ActivationSoftmax
+import org.nd4j.linalg.factory.Nd4j
+import org.nd4j.linalg.indexing.NDArrayIndex
 import org.nd4j.linalg.lossfunctions.impl.LossNegativeLogLikelihood
 import kotlin.system.measureTimeMillis
 
 
 class ConvTests {
+
+    @Test
+    fun `test interval`() {
+        val interval = NDArrayIndex.interval(3, 6)
+        //interval.reverse()
+        while (interval.hasNext())
+            println(interval.next())
+    }
 
     @Test
     fun `test mnist`() {
@@ -24,6 +34,9 @@ class ConvTests {
             val image = input("image", "depth" to 1, "height" to 28, "depth" to 28)
 
             image.reshape(1, 28, 28)
+
+            Nd4j.linspace(0, 5, 6)
+            NDArrayIndex.interval(2, 2, 6).reverse()
 
             image {
                 +Convolution2DLayer(20, 5.p2) { activation = ActivationLReLU() }

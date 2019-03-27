@@ -3,9 +3,9 @@ package com.rnett.knn.layers.convolutional
 import com.rnett.knn.*
 import com.rnett.knn.layers.feedforeward.FeedForwardLayer
 import org.deeplearning4j.nn.conf.ConvolutionMode
-import org.deeplearning4j.nn.conf.layers.Convolution1DLayer as DL4JConvolution1DLayer
 import org.deeplearning4j.nn.conf.layers.Convolution3D
 import kotlin.math.ceil
+import org.deeplearning4j.nn.conf.layers.Convolution1DLayer as DL4JConvolution1DLayer
 import org.deeplearning4j.nn.conf.layers.ConvolutionLayer as DL4JConvolutionLayer
 
 abstract class BaseConvolutionLayer<out T : DL4JConvolutionLayer, D : NParams, S : BaseConvolutionLayer<T, D, S>>(

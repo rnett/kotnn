@@ -14,9 +14,7 @@ abstract class BaseDepthwiseConvolutionLayer<out T : ConvolutionLayer, D : NPara
     dimensions: Int,
     filters: Int,
     name: String
-) : BaseConvolutionLayer<T, D, S>(dimensions, filters, name) {
-
-}
+) : BaseConvolutionLayer<T, D, S>(dimensions, filters, name)
 
 /*class DepthwiseConvolution1DLayer(
     filters: Int,
