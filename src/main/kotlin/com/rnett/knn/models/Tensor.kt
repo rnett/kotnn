@@ -2,6 +2,8 @@ package com.rnett.knn.models
 
 import com.rnett.knn.P
 import com.rnett.knn.Param2
+import com.rnett.knn.layers.CapsuleLayer
+//import com.rnett.knn.layers.CapsuleLayer
 import com.rnett.knn.layers.IHasLayers
 import com.rnett.knn.layers.ILayer
 import com.rnett.knn.layers.samediff.SameDiffLambdaDef
@@ -416,5 +418,9 @@ class Tensor internal constructor(vertex: GraphVertex) {
     }
 
     operator fun rem(others: List<Tensor>) = concat(others)
+
+
+    operator fun CapsuleLayer.ConfigHolder.unaryPlus() = +this.build(shape[0], shape[1])
+
 
 }

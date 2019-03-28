@@ -35,7 +35,7 @@ repositories {
     jcenter()
     maven( "https://dl.bintray.com/soywiz/soywiz")
     maven( "https://jitpack.io")
-    //maven( "https://oss.sonatype.org/content/repositories/snapshots")
+    maven("https://oss.sonatype.org/content/repositories/snapshots")
 }
 
 //val dl4j_version  = "1.0.0-beta3"

@@ -10,16 +10,12 @@ import kotlin.reflect.KProperty
 open class SameDiffLambdaDef(val SD: SameDiff) {
     operator fun SDVariable.unaryMinus(): SDVariable = this.neg()
 
-    operator fun SDVariable.plus(other: SDVariable): SDVariable = this.add(other)
     operator fun SDVariable.plus(other: Number): SDVariable = this.add(other.toDouble())
 
-    operator fun SDVariable.minus(other: SDVariable): SDVariable = this.sub(other)
     operator fun SDVariable.minus(other: Number): SDVariable = this.sub(other.toDouble())
 
-    operator fun SDVariable.times(other: SDVariable): SDVariable = this.mul(other)
     operator fun SDVariable.times(other: Number): SDVariable = this.mul(other.toDouble())
 
-    operator fun SDVariable.div(other: SDVariable): SDVariable = this.div(other)
     operator fun SDVariable.div(other: Number): SDVariable = this.div(other.toDouble())
 
     operator fun Number.plus(other: SDVariable): SDVariable = other.add(this.toDouble())
