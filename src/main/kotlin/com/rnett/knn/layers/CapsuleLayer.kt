@@ -12,87 +12,10 @@ import org.nd4j.autodiff.samediff.SDVariable
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.util.ArrayUtil
 
-//fun SameDiff.batchDot(
-//    a: SDVariable,
-//    aShape: List<Int>,
-//    b: SDVariable,
-//    bShape: List<Int>,
-//    aDim: Int,
-//    bDim: Int
-//): SDVariable {
-//
-//    val SD = this
-//
-//    var A = a
-//    var B = b
-//
-//    try {
-//        if (aShape != a.shape?.map { it.toInt() } ?: a.eval().shape().map { it.toInt() }) {
-//            println("Bad A shape")
-//        }
-//
-//        if (bShape != b.shape?.map { it.toInt() } ?: b.eval().shape().map { it.toInt() }) {
-//            println("Bad B shape")
-//        }
-//    } catch (e: Exception){
-//
-//    }
-//
-//    val aBatch = aShape[0]
-//    val bBatch = bShape[0]
-//
-//    if (aBatch != bBatch)
-//        throw IllegalArgumentException("Can only do batchDot on tensors with the same batch size")
-//
-//    var aDimension = if (aDim < 0) aShape.size + aDim else aDim
-//    val bDimension = if (bDim < 0) bShape.size + bDim else bDim
-//
-//    val sizeA = aShape[aDimension]
-//    val sizeB = bShape[bDimension]
-//
-//    val otherADims = aShape.filterIndexed { index, l -> index != aDimension }.drop(1).toIntArray()
-//    val otherBDims = bShape.filterIndexed { index, l -> index != bDimension }.drop(1).toIntArray()
-//
-//    val aRank = if (aShape.size == 2) {
-//        A = SD.expandDims(A, 1)
-//        aDimension++
-//        aShape.size + 1
-//    } else aShape.size
-//
-//    val bRank = if (bShape.size == 2) {
-//        B = SD.expandDims(B, 2)
-//        bShape.size + 1
-//    } else bShape.size
-//
-//
-//    if (aDimension != aRank - 1)
-//        A = A.permute(*(0 until aRank).minus(aDimension).toIntArray(), aDimension)
-//
-//    if (bDimension != 1)
-//        B = B.permute(0, bDimension, *(1 until bRank).minus(bDimension).toIntArray())
-//
-//    val aOthers = aShape.reduce { acc, l -> acc * l } / (aBatch * sizeA)
-//    val bOthers = bShape.reduce { acc, l -> acc * l } / (bBatch * sizeB)
-//
-//    if (aRank > 2)
-//        A = A.reshape(-1, aOthers, sizeA)
-//    if (bRank > 2)
-//        B = B.reshape(-1, sizeB, bOthers)
-//
-//    var result = mmul(A, B)
-//
-//    result = result.reshape(-1, *otherADims, *otherBDims)
-//
-//    if (aShape.size == 2)
-//        result = SD.squeeze(result, 1)
-//    else if (bShape.size == 2)
-//        result = SD.squeeze(result, -1)
-//
-//    return result
-//}
-
 
 //TODO optimize.  it is really close to x / scale
+//TODO check that this works with the dimensions/shapes its given
+// see https://github.com/naturomics/CapsNet-Tensorflow/blob/master/capsLayer.py
 fun SameDiffLambdaDef.squash(x: SDVariable): SDVariable {
     val squaredNorm = SD.squaredNorm(x)
     val scale = SD.math.sqrt(squaredNorm + 1e-7)
@@ -142,15 +65,16 @@ class CapsuleLayer(
         )
     )
 
-    override val biasParams = mapOf(
-        BIAS_KEY to listOf(1, 1, capsules, capsuleDimensions, 1)
-    )
+    //TODO implement bias
+//    override val biasParams = mapOf(
+//        BIAS_KEY to listOf(1, 1, capsules, capsuleDimensions, 1)
+//    )
 
     override fun initializeParams(params: MutableMap<String, INDArray>) {
         val weights by params
         params[WEIGHT_KEY] = weights.assign(0) //TODO initialize w/ property
-        val bias by params
-        params[BIAS_KEY] = bias.assign(0)
+//        val bias by params
+//        params[BIAS_KEY] = bias.assign(0)
     }
 
     override fun SameDiffDef.defineLayer(input: SDVariable): SDVariable {
@@ -166,9 +90,9 @@ class CapsuleLayer(
         ) // [mb, inputNumCaps, capsules  * capsuleDimensions, inputCapDims, 1]
 
         val weights by params
-        val bias by params
+        //val bias by params
 
-        var uHat = SD.sum(weights * tiled, true, 3)
+        val uHat = SD.sum(weights * tiled, true, 3)
             .reshape(
                 miniBatch,
                 inputNumCaps,
@@ -190,13 +114,18 @@ class CapsuleLayer(
 
             v = squash(SD.sum(c * uHat, true, 1)/* + bias*/) // [mb, 1, capsules, capsuleDimensions, 1]
 
+            if (i == routings - 1)
+                break
+
             val vTiled =
-                SD.tile(v, intArrayOf(1, inputNumCaps, 1, 1, 1)) // [mb, inputNumCaps, capsules, capsuleDimensions, 1]
+                SD.tile(
+                    v,
+                    intArrayOf(1, inputNumCaps, 1, 1, 1)
+                ) // [mb, inputNumCaps, capsules, capsuleDimensions, 1]
 
             val uMakesV = SD.sum(uHat * vTiled, true, 3) // [mb, inputNumCaps, capsules, 1, 1]
 
             b += uMakesV
-
         }
 
         return SD.squeeze(SD.squeeze(v, 1), 3)

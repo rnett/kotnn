@@ -50,8 +50,8 @@ dependencies {
     implementation("org.deeplearning4j:deeplearning4j-core:$dl4j_version")
     implementation("org.nd4j:nd4j-native-platform:$dl4j_version")
 
-    implementation("org.deeplearning4j:deeplearning4j-cuda-10.0:$dl4j_version")
-    implementation("org.nd4j:nd4j-cuda-10.0:$dl4j_version:windows-x86_64")
+    //implementation("org.deeplearning4j:deeplearning4j-cuda-10.0:$dl4j_version")
+    //implementation("org.nd4j:nd4j-cuda-10.0:$dl4j_version:windows-x86_64")
 
     //if(dl4j_version == "1.0.0-beta3")
     //    implementation("org.deeplearning4j:deeplearning4j-ui_2.10:1.0.0-beta3")
