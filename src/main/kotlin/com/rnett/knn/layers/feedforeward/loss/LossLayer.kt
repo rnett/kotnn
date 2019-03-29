@@ -4,14 +4,12 @@ import com.rnett.knn.layers.feedforeward.FeedForwardLayer
 import org.deeplearning4j.nn.conf.layers.Convolution3D
 import org.deeplearning4j.nn.conf.layers.Layer
 import org.deeplearning4j.nn.conf.layers.RnnLossLayer
-import org.deeplearning4j.nn.conf.layers.LossLayer as DL4JLossLayer
-import org.deeplearning4j.nn.conf.layers.CnnLossLayer as DL4JCnnLossLayer
-import org.deeplearning4j.nn.conf.layers.Cnn3DLossLayer as DL4JCnn3DLossLayer
 import org.nd4j.linalg.activations.impl.ActivationIdentity
-import org.nd4j.linalg.activations.impl.ActivationSoftmax
 import org.nd4j.linalg.lossfunctions.ILossFunction
 import org.nd4j.linalg.lossfunctions.impl.LossMCXENT
-import java.lang.UnsupportedOperationException
+import org.deeplearning4j.nn.conf.layers.Cnn3DLossLayer as DL4JCnn3DLossLayer
+import org.deeplearning4j.nn.conf.layers.CnnLossLayer as DL4JCnnLossLayer
+import org.deeplearning4j.nn.conf.layers.LossLayer as DL4JLossLayer
 
 abstract class BaseLossLayer<out T : org.deeplearning4j.nn.conf.layers.FeedForwardLayer, S : BaseLossLayer<T, S>>(
     name: String,
@@ -49,6 +47,7 @@ class LossLayer(
     }
 
     //TODO use? override fun outputShape(inputShape: List<Int>) = inputShape
+    //TODO I think outputShape is always zero
 }
 
 class RNNLossLayer(

@@ -3,12 +3,14 @@ package com.rnett.knn.layers
 import com.rnett.knn.Param2
 import com.rnett.knn.layers.convolutional.Convolution2DLayer
 import com.rnett.knn.layers.samediff.SameDiffDef
-import com.rnett.knn.layers.samediff.SameDiffLambdaDef
 import com.rnett.knn.layers.samediff.SameDiffLambdaLayer
 import com.rnett.knn.layers.samediff.SameDiffLayer
 import com.rnett.knn.layers.util.product
+import com.rnett.knn.models.Tensor
 import com.rnett.knn.p2
+import org.nd4j.autodiff.samediff.SDIndex
 import org.nd4j.autodiff.samediff.SDVariable
+import org.nd4j.autodiff.samediff.SameDiff
 import org.nd4j.linalg.api.ndarray.INDArray
 import org.nd4j.linalg.util.ArrayUtil
 
@@ -16,10 +18,10 @@ import org.nd4j.linalg.util.ArrayUtil
 //TODO optimize.  it is really close to x / scale
 //TODO check that this works with the dimensions/shapes its given
 // see https://github.com/naturomics/CapsNet-Tensorflow/blob/master/capsLayer.py
-fun SameDiffLambdaDef.squash(x: SDVariable): SDVariable {
-    val squaredNorm = SD.squaredNorm(x)
-    val scale = SD.math.sqrt(squaredNorm + 1e-7)
-    return x * scale / (squaredNorm + 1)
+fun SameDiff.squash(x: SDVariable): SDVariable {
+    val squaredNorm = squaredNorm(x)
+    val scale = math.sqrt(squaredNorm + 1e-7)
+    return x * scale / (squaredNorm + 1.0)
 }
 
 class CapsuleLayer(
@@ -79,22 +81,22 @@ class CapsuleLayer(
 
     override fun SameDiffDef.defineLayer(input: SDVariable): SDVariable {
 
-        val miniBatch = input.shape[0].toInt()
+        SD.enableDebugMode()
 
         // [mb, inputNumCaps, inputCapDims]
 
         val expanded = SD.expandDims(SD.expandDims(input, 2), 4) // [mb, inputNumCaps, 1, inputCapDims, 1]
         val tiled = SD.tile(
             expanded,
-            intArrayOf(1, 1, capsules * capsuleDimensions, 1, 1)
+            1, 1, capsules * capsuleDimensions, 1, 1
         ) // [mb, inputNumCaps, capsules  * capsuleDimensions, inputCapDims, 1]
 
         val weights by params
         //val bias by params
 
-        val uHat = SD.sum(weights * tiled, true, 3)
+        val uHat = (weights * tiled).sum(true, 3)
             .reshape(
-                miniBatch,
+                -1,
                 inputNumCaps,
                 capsules,
                 capsuleDimensions,
@@ -102,30 +104,61 @@ class CapsuleLayer(
             )// [mb, inputNumCaps, capsules, capsuleDimensions, 1]
 
 
-        var b = SD.zero("b", miniBatch, inputNumCaps, capsules, 1, 1)
+        var b =
+            SD.zerosLike(uHat)[SDIndex.all(), SDIndex.all(), SDIndex.all(), SDIndex.interval(0, 1), SDIndex.interval(
+                0,
+                1
+            )]
+
+        //SD.
+
+        val permuteForSoftmax = intArrayOf(2, 0, 1, 3, 4)
+
+//        val loopCounter = SD.zero("loopCounter", 1)
+//
+//        val loopV = SD.zero("v", miniBatch, 1, capsules, capsuleDimensions, 1)
+//
+//        val loopOut = SD.whileStatement(
+//            { SD, body, inputVars ->
+//                inputVars[0].lt(routings.toDouble())
+//            },
+//            { SD, inputs, params ->
+//                params
+//            },
+//            { SD, inputs, params ->
+//                val loopB = params[2]
+//                val loopUHat = params[3]
+//
+//                val c = SD.nn.softmax(loopB.permute(*permuteForSoftmax))
+//                    .permute(*ArrayUtil.invertPermutation(*permuteForSoftmax))
+//
+//                val v = SD.squash((c * loopUHat).sum(true, 1))
+//
+//                val vTiled = SD.tile(v, intArrayOf(1, inputNumCaps, 1, 1, 1))
+//
+//                arrayOf(params[0], loopB + (loopUHat * vTiled).sum(true, 3), v)
+//            },
+//            arrayOf(loopCounter + 1, loopV, b, uHat)
+//        ).inputVars[1]
+//        return SD.squeeze(SD.squeeze(loopOut, 1), 3)
 
         lateinit var v: SDVariable
         for (i in 0 until routings) { //TODO do I want backprop on inner iterations?  can I freeze it?
 
-            val permuteForSoftmax = intArrayOf(2, 0, 1, 3, 4)
-
             val c = SD.nn.softmax(b.permute(*permuteForSoftmax))
                 .permute(*ArrayUtil.invertPermutation(*permuteForSoftmax))
 
-            v = squash(SD.sum(c * uHat, true, 1)/* + bias*/) // [mb, 1, capsules, capsuleDimensions, 1]
+            v = SD.squash((c * uHat).sum(true, 1)/* + bias*/) // [mb, 1, capsules, capsuleDimensions, 1]
+
 
             if (i == routings - 1)
                 break
 
-            val vTiled =
-                SD.tile(
-                    v,
-                    intArrayOf(1, inputNumCaps, 1, 1, 1)
-                ) // [mb, inputNumCaps, capsules, capsuleDimensions, 1]
+            val vTiled = SD.tile(v, 1, inputNumCaps, 1, 1, 1)
+            // [mb, inputNumCaps, capsules, capsuleDimensions, 1]
 
-            val uMakesV = SD.sum(uHat * vTiled, true, 3) // [mb, inputNumCaps, capsules, 1, 1]
-
-            b += uMakesV
+            // [mb, inputNumCaps, capsules, 1, 1]
+            b += (uHat * vTiled).sum(true, 3)
         }
 
         return SD.squeeze(SD.squeeze(v, 1), 3)
@@ -138,29 +171,33 @@ class CapsuleLayer(
     }
 }
 
-class PrimaryCapsules(
-    val channels: Int,
-    val capsuleDimensions: Int,
-    val kernelSize: Param2 = 9.p2,
-    val stride: Param2 = 2.p2,
-    val padding: Param2 = 0.p2
-) : IHasLayers {
-    override val layers = listOf(
-        Convolution2DLayer(
-            channels * capsuleDimensions,
-            kernelSize,
-            stride,
-            padding,
-            name = "primarycaps_conv"
-        ), //TODO optional activation & settings
-        SameDiffLambdaLayer(
-            "primarycaps_samediff",
-            { listOf(it.product() / capsuleDimensions, capsuleDimensions) }) { input ->
-            //TODO check shapes
-            val shaped = input.reshape(input.shape[0].toInt(), -1, capsuleDimensions)
-            squash(shaped)
-        }
+fun Tensor.PrimaryCapsules(
+    channels: Int,
+    capsuleDimensions: Int,
+    kernelSize: Param2 = 9.p2,
+    stride: Param2 = 2.p2,
+    padding: Param2 = 0.p2
+): SameDiffLayer {
+    +Convolution2DLayer(
+        channels * capsuleDimensions,
+        kernelSize,
+        stride,
+        padding,
+        name = "primarycaps_conv"
     )
+    val capsules = shape.product() / capsuleDimensions
+    println(capsuleDimensions)
+    return SameDiffLambdaLayer(
+        "primarycaps_samediff",
+        { listOf(it.product() / capsuleDimensions, capsuleDimensions) }) { input ->
+        //TODO check shapes
+        val shaped = input.reshape(
+            -1,
+            capsules, //nessecary for variable minibatch
+            capsuleDimensions
+        )
+        SD.squash(shaped)
+    }
 }
 
 fun CapsuleStrength() = SameDiffLambdaLayer("caps_strength", { listOf(it.first()) }) { input ->
