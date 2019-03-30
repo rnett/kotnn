@@ -8,6 +8,7 @@ import com.rnett.knn.layers.samediff.SameDiffLayer
 import com.rnett.knn.layers.util.product
 import com.rnett.knn.models.Tensor
 import com.rnett.knn.p2
+import org.deeplearning4j.nn.weights.WeightInitUtil
 import org.nd4j.autodiff.samediff.SDIndex
 import org.nd4j.autodiff.samediff.SDVariable
 import org.nd4j.autodiff.samediff.SameDiff
@@ -17,11 +18,10 @@ import org.nd4j.linalg.util.ArrayUtil
 
 //TODO optimize.  it is really close to x / scale
 //TODO check that this works with the dimensions/shapes its given
-// see https://github.com/naturomics/CapsNet-Tensorflow/blob/master/capsLayer.py
-fun SameDiff.squash(x: SDVariable): SDVariable {
-    val squaredNorm = squaredNorm(x)
-    val scale = math.sqrt(squaredNorm + 1e-7)
-    return x * scale / (squaredNorm + 1.0)
+fun SameDiff.squash(x: SDVariable, dim: Int): SDVariable {
+    val squaredNorm = math.square(x).sum(true, dim)//squaredNorm(x, true, dim)
+    val scale = math.sqrt(squaredNorm + 1e-5)
+    return x * squaredNorm / (scale * (squaredNorm + 1.0))
 }
 
 class CapsuleLayer(
@@ -73,8 +73,15 @@ class CapsuleLayer(
 //    )
 
     override fun initializeParams(params: MutableMap<String, INDArray>) {
-        val weights by params
-        params[WEIGHT_KEY] = weights.assign(0) //TODO initialize w/ property
+        WeightInitUtil.initWeights(
+            (inputNumCaps * inputCapDims).toDouble(),
+            (capsules * capsuleDimensions).toDouble(),
+            longArrayOf(1, inputNumCaps.toLong(), (capsules * capsuleDimensions).toLong(), inputCapDims.toLong(), 1),
+            this.weightInit,
+            null,
+            'c',
+            params[WEIGHT_KEY]
+        )
 //        val bias by params
 //        params[BIAS_KEY] = bias.assign(0)
     }
@@ -148,7 +155,8 @@ class CapsuleLayer(
             val c = SD.nn.softmax(b.permute(*permuteForSoftmax))
                 .permute(*ArrayUtil.invertPermutation(*permuteForSoftmax))
 
-            v = SD.squash((c * uHat).sum(true, 1)/* + bias*/) // [mb, 1, capsules, capsuleDimensions, 1]
+            val pre = (c * uHat).sum(true, 1)
+            v = SD.squash(pre, 3) // [mb, 1, capsules, capsuleDimensions, 1]
 
 
             if (i == routings - 1)
@@ -196,7 +204,7 @@ fun Tensor.PrimaryCapsules(
             capsules, //nessecary for variable minibatch
             capsuleDimensions
         )
-        SD.squash(shaped)
+        SD.squash(shaped, 2)
     }
 }
 

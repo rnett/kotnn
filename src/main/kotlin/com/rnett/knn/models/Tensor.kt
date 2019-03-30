@@ -184,6 +184,10 @@ class Tensor internal constructor(vertex: GraphVertex) {
         this.apply(body)
     }
 
+    //TODO extend
+    @GraphBuilderDSL
+    fun addInParallel(vararg layers: IHasLayers) = layers.map { this.dup().updateVertex(it) }
+
     // shape operations
 
     @GraphBuilderDSL

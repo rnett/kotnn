@@ -28,19 +28,24 @@ object Runner {
         val deviceNativeOps = instance.deviceNativeOps
         deviceNativeOps.setOmpNumThreads(6)
 
+        val arr = Nd4j.linspace(1, 100, 100).reshape(10L, 10L)
+
+        println(arr.toFloatMatrix().toList().map { it.toList() })
+
         val model = graph {
-            val image = input("image", "depth" to 1, "height" to 28, "depth" to 28)
 
             optimizer = Optimizers.Adam
+
+            val image = input("image", "depth" to 1, "height" to 28, "depth" to 28)
 
             image.reshape(1, 28, 28)
 
             println(image.shape)
 
             image {
-                +Convolution2DLayer(32, 9.p2, 2.p2) { activation = ActivationLReLU() }
+                +Convolution2DLayer(16, 9.p2, 3.p2) { activation = ActivationLReLU() }
                 println("Conv: ${image.shape}")
-                +PrimaryCapsules(8, 8, 9.p2, 2.p2)
+                +PrimaryCapsules(8, 8, 7.p2, 2.p2)
                 println("PC: ${image.shape}")
                 +CapsuleLayer(10, 16, 3)
                 println("Caps: ${image.shape}")
